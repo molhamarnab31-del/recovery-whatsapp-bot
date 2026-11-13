@@ -1,0 +1,9 @@
+{
+  "name": "recovery-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot for Recovery Emirates",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  }
+}
