@@ -59,27 +59,13 @@ async function sendWhatsAppMessage(to, body) {
   }
 }
 
-async function askGemini(userText, senderName, hasAlreadySentLocation = false) {
+async function askGemini(userText, senderName) {
   try {
     if (!GEMINI_API_KEY) {
-      if (hasAlreadySentLocation) {
-        return "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن بأقرب سطحة.";
-      }
       return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
     }
 
-    let prompt = "";
-    if (hasAlreadySentLocation) {
-      prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
-العميل (${senderName || "الزبون"}) سبق وأن أرسل موقعه (اللوكيشن) وهو مستلم بالفعل والسائق تحرك باتجاهه.
-العميل يسأل الآن: "${userText}"
-هدف الرد:
-1. طمأنة العميل بلباقة واختصار (سطر واحد أو سطرين) أن موقعه مستلم وأن السائق في الطريق إليه الآن.
-2. ممنوع نهائياً طلب إرسال الموقع أو اللوكيشن مرة أخرى لأنه أرسله مسبقاً!
-3. ممنوع ذكر أي دقائق محددة أو وقت دقيق.
-4. ممنوع طلب نوع السيارة أو العطل وممنوع وضع أرقام هواتف.`;
-    } else {
-      prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
+    const prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
 هدف الرد:
 1. الترحيب بلباقة بلهجة إماراتية/عربية بسيطة ومختصرة جداً (سطرين فقط).
 2. طلب أمر واحد فقط لا غير من الزبون: إرسال موقعه المباشر (اللوكيشن) عبر واتساب ليتحرك السائق إليه فوراً.
@@ -88,7 +74,6 @@ async function askGemini(userText, senderName, hasAlreadySentLocation = false) {
 5. ممنوع كتابة أي رقم هاتف أو عبارة "للاتصال المباشر".
 
 رسالة الزبون (${senderName || "العميل"}): "${userText}"`;
-    }
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
@@ -103,21 +88,15 @@ async function askGemini(userText, senderName, hasAlreadySentLocation = false) {
     );
 
     if (!res.ok) {
-      return hasAlreadySentLocation
-        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
+      return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
     }
     const data = await res.json();
     return (
       data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      (hasAlreadySentLocation
-        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.")
+      "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً."
     );
   } catch (e) {
-    return hasAlreadySentLocation
-      ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-      : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
+    return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
   }
 }
 
@@ -129,44 +108,31 @@ module.exports = async (req, res) => {
   try {
     const payload = req.body?.data || req.body || {};
     const from = payload.from;
-    const to = payload.to;
     const fromMe = payload.fromMe;
     const type = payload.type;
     const body = (payload.body || "").trim();
     const senderName = payload.pushname || "العميل";
 
-    // تجاهل رسائل الحالة أو البث
-    if (from && from.includes("status@broadcast")) {
-      return res.status(200).json({ status: "ignored_broadcast" });
-    }
-
-    // 1. أمر إيقاف البوت يدوياً عن الزبون:
-    // إذا أرسلت أنت رسالة تبدأ بنقطة "." أو "#" (مثال: "." أو "#ستوب" أو ". هلا أخوي")
-    if (fromMe) {
-      if (body.startsWith(".") || body.startsWith("#")) {
-        const targetCustomer = to ? to.replace(/[^0-9]/g, "") : null;
-        if (targetCustomer && !targetCustomer.includes(DRIVER_PHONE)) {
-          // إيقاف البوت عن هذا الزبون لمدة ساعة (3600 ثانية)
-          await redisSet(`paused:${targetCustomer}`, "1", 3600);
-        }
-      }
-      return res.status(200).json({ status: "owner_message_handled" });
+    // تجاهل الرسائل الصادرة من حسابك أو رسائل البث
+    if (fromMe || !from || from.includes("status@broadcast")) {
+      return res.status(200).json({ status: "ignored" });
     }
 
     // تجاهل رسائل الشوفير نفسه
-    if (!from || from.includes(DRIVER_PHONE)) {
+    if (from.includes(DRIVER_PHONE)) {
       return res.status(200).json({ status: "ignored_driver" });
     }
 
     const cleanSenderNumber = from.replace(/[^0-9]/g, "");
 
-    // 2. التحقق هل البوت موقوف يدوياً عن هذا الزبون؟
+    // 1. فحص هل البوت موقوف مؤقتاً عن هذا الزبون (لأنه أرسل موقعه قبل أقل من ساعة)؟
     const isPaused = await redisGet(`paused:${cleanSenderNumber}`);
     if (isPaused) {
-      return res.status(200).json({ status: "bot_paused_for_manual_chat" });
+      // البوت صامت تماماً لتتحدث أنت والشوفير معه بحرية
+      return res.status(200).json({ status: "bot_paused_after_location" });
     }
 
-    // 3. هل أرسل الزبون موقعه (لوكيشن) أو رابط خريطة؟
+    // 2. هل أرسل الزبون موقعه (لوكيشن) أو رابط خريطة؟
     const isLocationMsg = type === "location" || (payload.lat && payload.lng);
     const hasMapLink =
       body.includes("maps.google.com") ||
@@ -200,16 +166,16 @@ module.exports = async (req, res) => {
         mapsUrl = body || "موقع بدون رابط";
       }
 
-      // حفظ أن هذا الزبون أرسل موقعه بنجاح
-      await redisSet(`has_location:${cleanSenderNumber}`, "1", 14400);
+      // إيقاف البوت مؤقتاً عن هذا الزبون لمدة ساعة كاملة (3600 ثانية)
+      await redisSet(`paused:${cleanSenderNumber}`, "1", 3600);
 
       // الرد على الزبون
       await sendWhatsAppMessage(
         cleanSenderNumber,
-        "تم استلام موقعك بنجاح ✅ السائق سيتصل بك فورا...."
+        "تم استلام موقعك بنجاح ✅ السائق سيتصل بك فورا."
       );
 
-      // إشعار الشوفير مع رابط الموقع المباشر
+      // إشعار الشوفير برقم الزبون ورابط الموقع المباشر
       const driverAlert =
         `🚨 طلب سطحة جديد!\n\n` +
         `👤 الاسم: ${senderName}\n` +
@@ -217,15 +183,12 @@ module.exports = async (req, res) => {
         `📍 موقع الزبون على خرائط جوجل:\n${mapsUrl}`;
       await sendWhatsAppMessage(DRIVER_PHONE, driverAlert);
 
-      return res.status(200).json({ status: "location_handled" });
+      return res.status(200).json({ status: "location_handled_and_paused" });
     }
 
-    // 4. رسالة نصية عادية من الزبون (دردشة مستمرة)
+    // 3. رسالة نصية عادية من الزبون (يرد عليه البوت باستمرار ولن يتوقف)
     if (type === "chat" && body) {
-      // فحص هل الزبون قد أرسل موقعه مسبقاً؟
-      const hasAlreadySentLocation = await redisGet(`has_location:${cleanSenderNumber}`);
-
-      const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation);
+      const aiReply = await askGemini(body, senderName);
       await sendWhatsAppMessage(cleanSenderNumber, aiReply);
 
       return res.status(200).json({ status: "chat_handled" });
