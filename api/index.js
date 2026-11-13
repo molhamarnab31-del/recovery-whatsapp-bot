@@ -31,7 +31,7 @@ async function redisGet(key) {
   }
 }
 
-async function redisSet(key, value, exSeconds = 7200) {
+async function redisSet(key, value, exSeconds = 3600) {
   try {
     await fetch(UPSTASH_URL, {
       method: "POST",
@@ -48,6 +48,10 @@ async function redisSet(key, value, exSeconds = 7200) {
 
 async function sendWhatsAppMessage(to, body) {
   try {
+    const cleanTo = to.replace(/[^0-9]/g, "");
+    // تمييز رسائل البوت في الذاكرة لمدة 60 ثانية ليعرف السيرفر أنها مرسلة من البوت وليست منك
+    await redisSet(`bot_sent:${cleanTo}`, "1", 60);
+
     const params = new URLSearchParams({ token: ULTRAMSG_TOKEN, to, body });
     await fetch(`https://api.ultramsg.com/${INSTANCE_ID}/messages/chat`, {
       method: "POST",
@@ -141,12 +145,21 @@ module.exports = async (req, res) => {
     }
 
     // 1. ميزة التحدث الحقيقي مع الزبون:
-    // إذا قمت أنت بمراسلة الزبون من هاتفك بنفسك (fromMe = true)، يتوقف البوت عن هذا الزبون لمدة ساعتين
+    // إذا كان الحدث رسالة صادرة من حسابك (fromMe = true)
     if (fromMe) {
       if (to && !to.includes(DRIVER_PHONE)) {
         const targetCustomer = to.replace(/[^0-9]/g, "");
-        // إيقاف البوت عن هذا الزبون لمدة ساعتين (7200 ثانية)
-        await redisSet(`paused:${targetCustomer}`, "1", 7200);
+
+        // فحص هل هذه الرسالة أرسلها البوت آلياً قبل قليل؟
+        const isBotAutomated = await redisGet(`bot_sent:${targetCustomer}`);
+        if (isBotAutomated) {
+          // رسالة البوت نفسه -> نتجاهلها ولا نوقف البوت
+          return res.status(200).json({ status: "bot_auto_msg_ignored" });
+        }
+
+        // إذا لم تكن من البوت، فهذا يعني أنك أنت من كتبتها بيدك من هاتفك!
+        // نوقف البوت عن هذا الزبون لمدة ساعة واحدة بالضبط (3600 ثانية)
+        await redisSet(`paused:${targetCustomer}`, "1", 3600);
       }
       return res.status(200).json({ status: "owner_sent_bot_paused" });
     }
@@ -161,7 +174,7 @@ module.exports = async (req, res) => {
     // 2. التحقق هل البوت متوقف حالياً عن هذا الزبون لأنك تتحدث معه؟
     const isPaused = await redisGet(`paused:${cleanSenderNumber}`);
     if (isPaused) {
-      // البوت يصمت تماماً ليسمح لك بالتحدث معه شخصياً
+      // البوت يصمت تماماً ليتيح لك التحدث شخصياً
       return res.status(200).json({ status: "bot_paused_for_manual_chat" });
     }
 
@@ -199,7 +212,7 @@ module.exports = async (req, res) => {
         mapsUrl = body || "موقع بدون رابط";
       }
 
-      // حفظ في الذاكرة أن هذا الزبون أرسل موقعه بالفعل (لمدة 4 ساعات)
+      // حفظ أن هذا الزبون أرسل موقعه بنجاح
       await redisSet(`has_location:${cleanSenderNumber}`, "1", 14400);
 
       // الرد على الزبون
@@ -227,7 +240,6 @@ module.exports = async (req, res) => {
       const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation);
       await sendWhatsAppMessage(cleanSenderNumber, aiReply);
 
-      // ملاحظة: لا نرسل أي تنبيه للشوفير للكلام العادي، فقط عند إرسال اللوكيشن
       return res.status(200).json({ status: "chat_handled" });
     }
 
