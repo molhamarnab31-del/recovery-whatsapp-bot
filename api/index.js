@@ -48,10 +48,6 @@ async function redisSet(key, value, exSeconds = 3600) {
 
 async function sendWhatsAppMessage(to, body) {
   try {
-    const cleanTo = to.replace(/[^0-9]/g, "");
-    // تمييز رسائل البوت في الذاكرة لمدة 60 ثانية ليعرف السيرفر أنها مرسلة من البوت وليست منك
-    await redisSet(`bot_sent:${cleanTo}`, "1", 60);
-
     const params = new URLSearchParams({ token: ULTRAMSG_TOKEN, to, body });
     await fetch(`https://api.ultramsg.com/${INSTANCE_ID}/messages/chat`, {
       method: "POST",
@@ -144,24 +140,17 @@ module.exports = async (req, res) => {
       return res.status(200).json({ status: "ignored_broadcast" });
     }
 
-    // 1. ميزة التحدث الحقيقي مع الزبون:
-    // إذا كان الحدث رسالة صادرة من حسابك (fromMe = true)
+    // 1. أمر إيقاف البوت يدوياً عن الزبون:
+    // إذا أرسلت أنت رسالة تبدأ بنقطة "." أو "#" (مثال: "." أو "#ستوب" أو ". هلا أخوي")
     if (fromMe) {
-      if (to && !to.includes(DRIVER_PHONE)) {
-        const targetCustomer = to.replace(/[^0-9]/g, "");
-
-        // فحص هل هذه الرسالة أرسلها البوت آلياً قبل قليل؟
-        const isBotAutomated = await redisGet(`bot_sent:${targetCustomer}`);
-        if (isBotAutomated) {
-          // رسالة البوت نفسه -> نتجاهلها ولا نوقف البوت
-          return res.status(200).json({ status: "bot_auto_msg_ignored" });
+      if (body.startsWith(".") || body.startsWith("#")) {
+        const targetCustomer = to ? to.replace(/[^0-9]/g, "") : null;
+        if (targetCustomer && !targetCustomer.includes(DRIVER_PHONE)) {
+          // إيقاف البوت عن هذا الزبون لمدة ساعة (3600 ثانية)
+          await redisSet(`paused:${targetCustomer}`, "1", 3600);
         }
-
-        // إذا لم تكن من البوت، فهذا يعني أنك أنت من كتبتها بيدك من هاتفك!
-        // نوقف البوت عن هذا الزبون لمدة ساعة واحدة بالضبط (3600 ثانية)
-        await redisSet(`paused:${targetCustomer}`, "1", 3600);
       }
-      return res.status(200).json({ status: "owner_sent_bot_paused" });
+      return res.status(200).json({ status: "owner_message_handled" });
     }
 
     // تجاهل رسائل الشوفير نفسه
@@ -171,10 +160,9 @@ module.exports = async (req, res) => {
 
     const cleanSenderNumber = from.replace(/[^0-9]/g, "");
 
-    // 2. التحقق هل البوت متوقف حالياً عن هذا الزبون لأنك تتحدث معه؟
+    // 2. التحقق هل البوت موقوف يدوياً عن هذا الزبون؟
     const isPaused = await redisGet(`paused:${cleanSenderNumber}`);
     if (isPaused) {
-      // البوت يصمت تماماً ليتيح لك التحدث شخصياً
       return res.status(200).json({ status: "bot_paused_for_manual_chat" });
     }
 
@@ -218,7 +206,7 @@ module.exports = async (req, res) => {
       // الرد على الزبون
       await sendWhatsAppMessage(
         cleanSenderNumber,
-        "تم استلام موقعك بنجاح ✅ السائق في طريقه إليك الآن."
+        "تم استلام موقعك بنجاح ✅ السائق سيتصل بك فورا...."
       );
 
       // إشعار الشوفير مع رابط الموقع المباشر
@@ -232,7 +220,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ status: "location_handled" });
     }
 
-    // 4. رسالة نصية عادية من الزبون (دردشة)
+    // 4. رسالة نصية عادية من الزبون (دردشة مستمرة)
     if (type === "chat" && body) {
       // فحص هل الزبون قد أرسل موقعه مسبقاً؟
       const hasAlreadySentLocation = await redisGet(`has_location:${cleanSenderNumber}`);
