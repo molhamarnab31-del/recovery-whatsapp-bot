@@ -31,7 +31,7 @@ async function redisGet(key) {
   }
 }
 
-async function redisSet(key, value, exSeconds = 3600) {
+async function redisSet(key, value, exSeconds = 7200) {
   try {
     await fetch(UPSTASH_URL, {
       method: "POST",
@@ -59,13 +59,27 @@ async function sendWhatsAppMessage(to, body) {
   }
 }
 
-async function askGemini(userText, senderName) {
+async function askGemini(userText, senderName, hasAlreadySentLocation = false) {
   try {
     if (!GEMINI_API_KEY) {
+      if (hasAlreadySentLocation) {
+        return "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن بأقرب سطحة.";
+      }
       return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
     }
 
-    const prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
+    let prompt = "";
+    if (hasAlreadySentLocation) {
+      prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
+العميل (${senderName || "الزبون"}) سبق وأن أرسل موقعه (اللوكيشن) وهو مستلم بالفعل والسائق تحرك باتجاهه.
+العميل يسأل الآن: "${userText}"
+هدف الرد:
+1. طمأنة العميل بلباقة واختصار (سطر واحد أو سطرين) أن موقعه مستلم وأن السائق في الطريق إليه الآن.
+2. ممنوع نهائياً طلب إرسال الموقع أو اللوكيشن مرة أخرى لأنه أرسله مسبقاً!
+3. ممنوع ذكر أي دقائق محددة أو وقت دقيق.
+4. ممنوع طلب نوع السيارة أو العطل وممنوع وضع أرقام هواتف.`;
+    } else {
+      prompt = `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
 هدف الرد:
 1. الترحيب بلباقة بلهجة إماراتية/عربية بسيطة ومختصرة جداً (سطرين فقط).
 2. طلب أمر واحد فقط لا غير من الزبون: إرسال موقعه المباشر (اللوكيشن) عبر واتساب ليتحرك السائق إليه فوراً.
@@ -74,6 +88,7 @@ async function askGemini(userText, senderName) {
 5. ممنوع كتابة أي رقم هاتف أو عبارة "للاتصال المباشر".
 
 رسالة الزبون (${senderName || "العميل"}): "${userText}"`;
+    }
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
@@ -88,19 +103,86 @@ async function askGemini(userText, senderName) {
     );
 
     if (!res.ok) {
-      return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
+      return hasAlreadySentLocation
+        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
+        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
     }
     const data = await res.json();
     return (
       data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً."
+      (hasAlreadySentLocation
+        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
+        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.")
     );
   } catch (e) {
-    return "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
+    return hasAlreadySentLocation
+      ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
+      : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن) لنتحرك لك بأقرب سطحة فوراً.";
   }
 }
 
 module.exports = async (req, res) => {
+  // التعامل مع المكالمات الفائتة عبر رابط مباشر (GET أو POST) من تطبيق الأندرويد
+  const query = req.query || {};
+  const isMissedCall =
+    query.action === "missed_call" || req.body?.action === "missed_call";
+
+  if (isMissedCall) {
+    const rawPhone = query.phone || req.body?.phone;
+    const secret = query.secret || req.body?.secret;
+
+    if (secret !== "emirates2026") {
+      return res.status(403).json({ error: "Invalid secret key" });
+    }
+
+    if (!rawPhone) {
+      return res.status(400).json({ error: "Phone number required" });
+    }
+
+    // تنظيف وتوحيد رقم الهاتف الإماراتي
+    let cleanPhone = String(rawPhone).replace(/[^0-9]/g, "");
+
+    // تحويل 05xxxxxxxx إلى 9715xxxxxxxx
+    if (cleanPhone.startsWith("05") && cleanPhone.length === 10) {
+      cleanPhone = "971" + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith("5") && cleanPhone.length === 9) {
+      cleanPhone = "971" + cleanPhone;
+    } else if (cleanPhone.startsWith("00971")) {
+      cleanPhone = cleanPhone.substring(2);
+    }
+
+    // تجاهل الأرقام غير الصالحة
+    if (cleanPhone.length < 9) {
+      return res.status(400).json({ error: "Invalid phone length" });
+    }
+
+    // فحص هل تم تنبيه هذا الرقم مؤخراً (خلال آخر 30 دقيقة) لتجنب الإزعاج
+    const alreadyNotified = await redisGet(`missed_call:${cleanPhone}`);
+    if (alreadyNotified) {
+      return res.status(200).json({
+        status: "already_notified_recently",
+        message: "تم تنبيه هذا الرقم مسبقاً خلال آخر 30 دقيقة",
+      });
+    }
+
+    // حفظ في الذاكرة لمنع تكرار الإرسال لنفس الرقم لمدة نصف ساعة (1800 ثانية)
+    await redisSet(`missed_call:${cleanPhone}`, "1", 1800);
+
+    // إرسال رسالة الواتساب الفورية للعميل
+    const missedCallMsg =
+      `مرحباً بك في ريكفري الإمارات\n\n` +
+      `هل تحتاج سطحة لنقل سيارتك؟\n` +
+      `فضلاً أرسل موقعك المباشر (اللوكيشن 📍) هنا في المحادثة وسيتصل بك أقرب سائق فوراً.`;
+
+    await sendWhatsAppMessage(cleanPhone, missedCallMsg);
+
+    return res.status(200).json({
+      status: "success",
+      notified_phone: cleanPhone,
+      message: "تم إرسال رسالة الواتساب للعميل بنجاح",
+    });
+  }
+
   if (req.method === "GET") {
     return res.status(200).send("Recovery Emirates WhatsApp Bot is Running ✅");
   }
@@ -108,31 +190,43 @@ module.exports = async (req, res) => {
   try {
     const payload = req.body?.data || req.body || {};
     const from = payload.from;
+    const to = payload.to;
     const fromMe = payload.fromMe;
     const type = payload.type;
     const body = (payload.body || "").trim();
     const senderName = payload.pushname || "العميل";
 
-    // تجاهل الرسائل الصادرة من حسابك أو رسائل البث
-    if (fromMe || !from || from.includes("status@broadcast")) {
-      return res.status(200).json({ status: "ignored" });
+    // تجاهل رسائل الحالة أو البث
+    if (from && from.includes("status@broadcast")) {
+      return res.status(200).json({ status: "ignored_broadcast" });
+    }
+
+    // 1. ميزة التحدث الحقيقي مع الزبون:
+    // إذا قمت أنت بمراسلة الزبون من هاتفك بنفسك (fromMe = true)، يتوقف البوت عن هذا الزبون لمدة ساعتين
+    if (fromMe) {
+      if (to && !to.includes(DRIVER_PHONE)) {
+        const targetCustomer = to.replace(/[^0-9]/g, "");
+        // إيقاف البوت عن هذا الزبون لمدة ساعتين (7200 ثانية)
+        await redisSet(`paused:${targetCustomer}`, "1", 7200);
+      }
+      return res.status(200).json({ status: "owner_sent_bot_paused" });
     }
 
     // تجاهل رسائل الشوفير نفسه
-    if (from.includes(DRIVER_PHONE)) {
+    if (!from || from.includes(DRIVER_PHONE)) {
       return res.status(200).json({ status: "ignored_driver" });
     }
 
     const cleanSenderNumber = from.replace(/[^0-9]/g, "");
 
-    // 1. فحص هل البوت موقوف مؤقتاً عن هذا الزبون (لأنه أرسل موقعه قبل أقل من ساعة)؟
+    // 2. التحقق هل البوت متوقف حالياً عن هذا الزبون لأنك تتحدث معه؟
     const isPaused = await redisGet(`paused:${cleanSenderNumber}`);
     if (isPaused) {
-      // البوت صامت تماماً لتتحدث أنت والشوفير معه بحرية
-      return res.status(200).json({ status: "bot_paused_after_location" });
+      // البوت يصمت تماماً ليسمح لك بالتحدث معه شخصياً
+      return res.status(200).json({ status: "bot_paused_for_manual_chat" });
     }
 
-    // 2. هل أرسل الزبون موقعه (لوكيشن) أو رابط خريطة؟
+    // 3. هل أرسل الزبون موقعه (لوكيشن) أو رابط خريطة؟
     const isLocationMsg = type === "location" || (payload.lat && payload.lng);
     const hasMapLink =
       body.includes("maps.google.com") ||
@@ -166,16 +260,16 @@ module.exports = async (req, res) => {
         mapsUrl = body || "موقع بدون رابط";
       }
 
-      // إيقاف البوت مؤقتاً عن هذا الزبون لمدة ساعة كاملة (3600 ثانية)
-      await redisSet(`paused:${cleanSenderNumber}`, "1", 3600);
+      // حفظ في الذاكرة أن هذا الزبون أرسل موقعه بالفعل (لمدة 4 ساعات)
+      await redisSet(`has_location:${cleanSenderNumber}`, "1", 14400);
 
       // الرد على الزبون
       await sendWhatsAppMessage(
         cleanSenderNumber,
-        "تم استلام موقعك بنجاح ✅ السائق سيتصل بك فورا."
+        "تم استلام موقعك بنجاح ✅ السائق في طريقه إليك الآن."
       );
 
-      // إشعار الشوفير برقم الزبون ورابط الموقع المباشر
+      // إشعار الشوفير مع رابط الموقع المباشر
       const driverAlert =
         `🚨 طلب سطحة جديد!\n\n` +
         `👤 الاسم: ${senderName}\n` +
@@ -183,14 +277,18 @@ module.exports = async (req, res) => {
         `📍 موقع الزبون على خرائط جوجل:\n${mapsUrl}`;
       await sendWhatsAppMessage(DRIVER_PHONE, driverAlert);
 
-      return res.status(200).json({ status: "location_handled_and_paused" });
+      return res.status(200).json({ status: "location_handled" });
     }
 
-    // 3. رسالة نصية عادية من الزبون (يرد عليه البوت باستمرار ولن يتوقف)
+    // 4. رسالة نصية عادية من الزبون (دردشة)
     if (type === "chat" && body) {
-      const aiReply = await askGemini(body, senderName);
+      // فحص هل الزبون قد أرسل موقعه مسبقاً؟
+      const hasAlreadySentLocation = await redisGet(`has_location:${cleanSenderNumber}`);
+
+      const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation);
       await sendWhatsAppMessage(cleanSenderNumber, aiReply);
 
+      // ملاحظة: لا نرسل أي تنبيه للشوفير للكلام العادي، فقط عند إرسال اللوكيشن
       return res.status(200).json({ status: "chat_handled" });
     }
 
