@@ -128,14 +128,21 @@ module.exports = async (req, res) => {
     query.action === "missed_call" || req.body?.action === "missed_call";
 
   if (isMissedCall) {
-    const rawPhone = query.phone || req.body?.phone;
+    let rawPhone = query.phone || req.body?.phone;
+    const smsPhone = query.sms_phone || req.body?.sms_phone;
+
+    // إذا تم تشغيلهما في ماكرو واحد، نأخذ الرقم الفعلي المتوفر
+    if (!rawPhone || String(rawPhone).includes("[") || String(rawPhone).trim() === "") {
+      rawPhone = smsPhone;
+    }
+
     const secret = query.secret || req.body?.secret;
 
     if (secret !== "emirates2026") {
       return res.status(403).json({ error: "Invalid secret key" });
     }
 
-    if (!rawPhone) {
+    if (!rawPhone || String(rawPhone).includes("[")) {
       return res.status(400).json({ error: "Phone number required" });
     }
 
