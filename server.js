@@ -128,7 +128,7 @@ ${historyText}
 4. ممنوع ذكر وقت وصول محدد بالدقائق (لا تقل 15 دقيقة)، وممنوع وضع أرقام هواتف في الرسالة.
 5. اجعل الرد مختصراً ومرتباً ومناسباً للواتساب (2 إلى 4 أسطر كحد أقصى).`;
 
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash"];
   for (const model of models) {
     try {
       const res = await fetch(
@@ -333,7 +333,7 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.4" });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.5" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
@@ -345,7 +345,7 @@ app.get("/test-ai", async (req, res) => {
   const debug = [];
 
   try {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -353,12 +353,12 @@ app.get("/test-ai", async (req, res) => {
       },
       body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
     });
-    debug.push({ test: "generateContent_x_goog", status: r.status, body: (await r.text()).substring(0, 300) });
+    debug.push({ test: "gemini-3.8-flash", status: r.status, body: (await r.text()).substring(0, 300) });
   } catch (e) {
-    debug.push({ test: "generateContent_x_goog", error: e.message });
+    debug.push({ test: "gemini-3.8-flash", error: e.message });
   }
 
-  res.json({ version: "2.4", hasKey: !!GEMINI_API_KEY, debug });
+  res.json({ version: "2.5", hasKey: !!GEMINI_API_KEY, debug });
 });
 
 // Reset / Logout route
