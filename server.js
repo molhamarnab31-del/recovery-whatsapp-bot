@@ -24,7 +24,7 @@ const UPSTASH_TOKEN =
 
 // Obfuscated Gemini Auth Key
 const DEFAULT_KEY = Buffer.from(
-  "QVEuQWI4Uk42SS1Qd3J0c0dYYXp3dXJlNXVvX2M5YnQwQVp0TGNBazZicE9JWVJDdVpXT1E=",
+  "QVEuQWI4Uk42SS1Qd3J0c0dYYXp3dXJlNXVvX2M5YnQwQVp0TGNBazZicE9sWVJDdVpXT1E=",
   "base64"
 ).toString("utf-8");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || DEFAULT_KEY;
@@ -333,7 +333,7 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.3" });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.4" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
@@ -344,38 +344,21 @@ app.get("/test-ai", async (req, res) => {
   const q = req.query.q || "كم سعر سحب السيارة في دبي؟";
   const debug = [];
 
-  // Test 1: Interactions API with x-goog-api-key
-  try {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
-        "Api-Revision": "2026-05-20",
-      },
-      body: JSON.stringify({ model: "gemini-2.5-flash", input: q }),
-    });
-    debug.push({ test: "interactions_x_goog", status: r.status, body: (await r.text()).substring(0, 300) });
-  } catch (e) {
-    debug.push({ test: "interactions_x_goog", error: e.message });
-  }
-
-  // Test 2: generateContent with Authorization Bearer
   try {
     const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${GEMINI_API_KEY}`,
+        "x-goog-api-key": GEMINI_API_KEY,
       },
       body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
     });
-    debug.push({ test: "generateContent_bearer", status: r.status, body: (await r.text()).substring(0, 300) });
+    debug.push({ test: "generateContent_x_goog", status: r.status, body: (await r.text()).substring(0, 300) });
   } catch (e) {
-    debug.push({ test: "generateContent_bearer", error: e.message });
+    debug.push({ test: "generateContent_x_goog", error: e.message });
   }
 
-  res.json({ version: "2.3", hasKey: !!GEMINI_API_KEY, keyPrefix: GEMINI_API_KEY.substring(0, 6), debug });
+  res.json({ version: "2.4", hasKey: !!GEMINI_API_KEY, debug });
 });
 
 // Reset / Logout route
