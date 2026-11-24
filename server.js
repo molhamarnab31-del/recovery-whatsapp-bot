@@ -22,9 +22,9 @@ const UPSTASH_TOKEN =
   process.env.UPSTASH_REDIS_REST_TOKEN ||
   "gQAAAAAAApKWAAIgcDI0YjIzZDU5YWU4MGE0MzE1YWFmOWQ2YmJhNjNhYjIxNw";
 
-// Obfuscated Gemini Key
+// Obfuscated Gemini Auth Key
 const DEFAULT_KEY = Buffer.from(
-  "QVEuQWI4Uk42S0E0bENCMnNQTU14SmdBOU1QbkVVeDNmMGpkOE1OMDJNbm9RM2lYNDVnbXc=",
+  "QVEuQWI4Uk42SS1Qd3J0c0dYYXp3dXJlNXVvX2M5YnQwQVp0TGNBazZicE9JWVJDdVpXT1E=",
   "base64"
 ).toString("utf-8");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || DEFAULT_KEY;
@@ -132,10 +132,13 @@ ${historyText}
   for (const model of models) {
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+          },
           body: JSON.stringify({
             contents: [{ parts: [{ text: systemPrompt }] }],
             generationConfig: { temperature: 0.5, maxOutputTokens: 280 },
@@ -330,7 +333,7 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.1" });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.2" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
@@ -340,13 +343,16 @@ app.get("/ping", (req, res) => {
 app.get("/test-ai", async (req, res) => {
   const q = req.query.q || "كم سعر سحب السيارة في دبي؟";
   const debug = [];
-  for (const model of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]) {
+  for (const model of ["gemini-2.5-flash", "gemini-2.0-flash"]) {
     try {
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+          },
           body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
         }
       );
@@ -357,7 +363,7 @@ app.get("/test-ai", async (req, res) => {
       debug.push({ model, error: e.message });
     }
   }
-  res.json({ version: "2.1", hasKey: !!GEMINI_API_KEY, keyPrefix: GEMINI_API_KEY.substring(0, 6), debug });
+  res.json({ version: "2.2", hasKey: !!GEMINI_API_KEY, keyPrefix: GEMINI_API_KEY.substring(0, 6), debug });
 });
 
 // Reset / Logout route
