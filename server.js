@@ -330,10 +330,34 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.1" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
+});
+
+// Diagnostic endpoint to test Gemini AI directly from Render cloud
+app.get("/test-ai", async (req, res) => {
+  const q = req.query.q || "كم سعر سحب السيارة في دبي؟";
+  const debug = [];
+  for (const model of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
+        }
+      );
+      const txt = await r.text();
+      debug.push({ model, status: r.status, body: txt.substring(0, 300) });
+      if (r.ok) break;
+    } catch (e) {
+      debug.push({ model, error: e.message });
+    }
+  }
+  res.json({ version: "2.1", hasKey: !!GEMINI_API_KEY, keyPrefix: GEMINI_API_KEY.substring(0, 6), debug });
 });
 
 // Reset / Logout route
