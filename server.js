@@ -128,7 +128,7 @@ ${historyText}
 4. ممنوع ذكر وقت وصول محدد بالدقائق (لا تقل 15 دقيقة)، وممنوع وضع أرقام هواتف في الرسالة.
 5. اجعل الرد مختصراً ومرتباً ومناسباً للواتساب (2 إلى 4 أسطر كحد أقصى).`;
 
-  const models = ["gemini-3.8-flash", "gemini-3.7-flash"];
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
   for (const model of models) {
     try {
       const res = await fetch(
@@ -333,7 +333,7 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.5" });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.6" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
@@ -344,21 +344,24 @@ app.get("/test-ai", async (req, res) => {
   const q = req.query.q || "كم سعر سحب السيارة في دبي؟";
   const debug = [];
 
-  try {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
-      },
-      body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
-    });
-    debug.push({ test: "gemini-3.8-flash", status: r.status, body: (await r.text()).substring(0, 300) });
-  } catch (e) {
-    debug.push({ test: "gemini-3.8-flash", error: e.message });
+  for (const model of ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY,
+        },
+        body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
+      });
+      debug.push({ model, status: r.status, body: (await r.text()).substring(0, 200) });
+      if (r.ok) break;
+    } catch (e) {
+      debug.push({ model, error: e.message });
+    }
   }
 
-  res.json({ version: "2.5", hasKey: !!GEMINI_API_KEY, debug });
+  res.json({ version: "2.6", hasKey: !!GEMINI_API_KEY, debug });
 });
 
 // Reset / Logout route
