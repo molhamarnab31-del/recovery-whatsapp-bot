@@ -128,7 +128,7 @@ ${historyText}
 4. ممنوع ذكر وقت وصول محدد بالدقائق (لا تقل 15 دقيقة)، وممنوع وضع أرقام هواتف في الرسالة.
 5. اجعل الرد مختصراً ومرتباً ومناسباً للواتساب (2 إلى 4 أسطر كحد أقصى).`;
 
-  const models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+  const models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.8-flash"];
   for (const model of models) {
     try {
       const res = await fetch(
@@ -139,9 +139,14 @@ ${historyText}
             "Content-Type": "application/json",
             "x-goog-api-key": GEMINI_API_KEY,
           },
+          signal: AbortSignal.timeout(7000),
           body: JSON.stringify({
             contents: [{ parts: [{ text: systemPrompt }] }],
-            generationConfig: { temperature: 0.5, maxOutputTokens: 280 },
+            generationConfig: {
+              temperature: 0.4,
+              maxOutputTokens: 250,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
           }),
         }
       );
@@ -244,8 +249,13 @@ async function startWhatsApp() {
             continue;
           }
 
-          // Check if bot is paused for this customer
-          const isPaused = await redisGet(`paused:${cleanSenderNumber}`);
+          // Fetch paused, location, and history in parallel for instant response
+          const [isPaused, hasAlreadySentLocation, rawHist] = await Promise.all([
+            redisGet(`paused:${cleanSenderNumber}`),
+            redisGet(`has_location:${cleanSenderNumber}`),
+            redisGet(`history:${cleanSenderNumber}`),
+          ]);
+
           if (isPaused) {
             continue;
           }
@@ -300,25 +310,21 @@ async function startWhatsApp() {
 
           // Handle normal text message
           if (body) {
-            const hasAlreadySentLocation = await redisGet(`has_location:${cleanSenderNumber}`);
             let history = [];
             try {
-              const rawHist = await redisGet(`history:${cleanSenderNumber}`);
               if (rawHist) history = JSON.parse(rawHist);
             } catch (e) {}
 
             const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation, history);
             await sendWhatsAppMessage(jid, aiReply);
 
-            // Save conversation history (last 6 messages, 1 hour TTL)
-            try {
-              const updatedHistory = [
-                ...history,
-                { role: "user", text: body },
-                { role: "bot", text: aiReply },
-              ].slice(-6);
-              await redisSet(`history:${cleanSenderNumber}`, JSON.stringify(updatedHistory), 3600);
-            } catch (e) {}
+            // Save conversation history in background (no await needed)
+            const updatedHistory = [
+              ...history,
+              { role: "user", text: body },
+              { role: "bot", text: aiReply },
+            ].slice(-6);
+            redisSet(`history:${cleanSenderNumber}`, JSON.stringify(updatedHistory), 3600).catch(() => {});
           }
         } catch (err) {
           console.error("Message processing error:", err.message);
@@ -333,7 +339,7 @@ async function startWhatsApp() {
 
 // Health check for UptimeRobot
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.6" });
+  res.status(200).json({ status: "ok", whatsapp: connectionStatus, version: "2.7" });
 });
 app.get("/ping", (req, res) => {
   res.status(200).send("pong");
@@ -344,7 +350,8 @@ app.get("/test-ai", async (req, res) => {
   const q = req.query.q || "كم سعر سحب السيارة في دبي؟";
   const debug = [];
 
-  for (const model of ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]) {
+  for (const model of ["gemini-3.6-flash", "gemini-3.5-flash"]) {
+    const start = Date.now();
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: "POST",
@@ -352,16 +359,19 @@ app.get("/test-ai", async (req, res) => {
           "Content-Type": "application/json",
           "x-goog-api-key": GEMINI_API_KEY,
         },
-        body: JSON.stringify({ contents: [{ parts: [{ text: q }] }] }),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: q }] }],
+          generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
+        }),
       });
-      debug.push({ model, status: r.status, body: (await r.text()).substring(0, 200) });
+      debug.push({ model, ms: Date.now() - start, status: r.status, body: (await r.text()).substring(0, 200) });
       if (r.ok) break;
     } catch (e) {
-      debug.push({ model, error: e.message });
+      debug.push({ model, ms: Date.now() - start, error: e.message });
     }
   }
 
-  res.json({ version: "2.6", hasKey: !!GEMINI_API_KEY, debug });
+  res.json({ version: "2.7", hasKey: !!GEMINI_API_KEY, debug });
 });
 
 // Reset / Logout route
