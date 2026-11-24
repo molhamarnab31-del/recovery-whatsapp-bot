@@ -88,64 +88,76 @@ async function sendWhatsAppMessage(phoneOrJid, text) {
   }
 }
 
-// Gemini AI Reply
-async function askGemini(userText, senderName, hasAlreadySentLocation = false) {
-  try {
-    if (!GEMINI_API_KEY) {
-      return hasAlreadySentLocation
-        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن بأقرب سطحة."
-        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن 📍) لنتحرك لك بأقرب سطحة فوراً.";
-    }
+// Gemini AI Reply with Multilingual Conversational Memory
+async function askGemini(userText, senderName, hasAlreadySentLocation = false, history = []) {
+  const fallback = hasAlreadySentLocation
+    ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
+    : "يا هلا بك في ريكفري الإمارات.\nكيف يمكنني مساعدتك اليوم؟ إذا كنت تحتاج سطحة، فضلاً أرسل موقعك المباشر (اللوكيشن 📍) وسنخدمك فوراً.";
 
-    const prompt = hasAlreadySentLocation
-      ? `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
-العميل (${senderName || "الزبون"}) سبق وأن أرسل موقعه (اللوكيشن) وهو مستلم بالفعل والسائق تحرك باتجاهه.
-العميل يسأل الآن: "${userText}"
-هدف الرد:
-1. طمأنة العميل بلباقة واختصار (سطر واحد أو سطرين) أن موقعه مستلم وأن السائق في الطريق إليه الآن.
-2. ممنوع نهائياً طلب إرسال الموقع أو اللوكيشن مرة أخرى لأنه أرسله مسبقاً!
-3. ممنوع ذكر أي دقائق محددة أو وقت دقيق.
-4. ممنوع طلب نوع السيارة أو العطل وممنوع وضع أرقام هواتف.`
-      : `أنت المساعد الذكي لخدمة "ريكفري الإمارات" (سطحة وسحب سيارات 24/7).
-هدف الرد:
-1. الترحيب بلباقة بلهجة إماراتية/عربية بسيطة ومختصرة جداً (سطرين فقط).
-2. طلب أمر واحد فقط لا غير من الزبون: إرسال موقعه المباشر (اللوكيشن) عبر واتساب ليتحرك السائق إليه فوراً.
-3. ممنوع نهائياً ذكر أي وقت أو دقائق (لا تقل 15 دقيقة ولا غيرها).
-4. ممنوع طلب نوع السيارة أو سبب العطل نهائياً.
-5. ممنوع كتابة أي رقم هاتف أو عبارة "للاتصال المباشر".
+  if (!GEMINI_API_KEY) return fallback;
 
-رسالة الزبون (${senderName || "العميل"}): "${userText}"`;
+  const historyText = history.length
+    ? "\nسجل المحادثة السابقة:\n" + history.map((h) => `${h.role === "user" ? "العميل" : "أنت"}: ${h.text}`).join("\n")
+    : "";
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 80 },
-        }),
+  const systemPrompt = hasAlreadySentLocation
+    ? `أنت موظف خدمة عملاء ذكي ولطيف في شركة "ريكفري الإمارات" (Recovery Emirates) لخدمات الونش والسطحات ونقل السيارات في الإمارات 24/7.
+العميل (${senderName || "الزبون"}) أرسل موقعه بالفعل والسائق استلم الطلب وفي طريقه للتواصل معه.
+${historyText}
+رسالة العميل الحالية: "${userText}"
+
+التعليمات:
+1. أجب بنفس لغة العميل تماماً (إذا كتب بالإنجليزية رد بالإنجليزية، إذا بالعربية رد بالعربية، إذا بالأردو أو أي لغة أخرى رد بنفس لغته).
+2. أجب عن استفساره بوضوح ولباقة وطمئنه أن موقعه مستلم والسائق سيتصل به فوراً.
+3. لا تطلب منه إرسال الموقع مجدداً لأنه أرسله بالفعل.
+4. ممنوع ذكر عدد دقائق محددة للوصول وممنوع كتابة أرقام هواتف في الرد.`
+    : `أنت موظف خدمة عملاء محترف وودود في شركة "ريكفري الإمارات" (Recovery Emirates / abudhabiwinch.com) لخدمات نقل وسحب السيارات في دولة الإمارات العربية المتحدة.
+${historyText}
+رسالة العميل الحالية (${senderName || "العميل"}): "${userText}"
+
+معلومات الشركة التي يمكنك استخدامها للإجابة عن أي سؤال:
+- الخدمات: سطحات هيدروليك فل داون (Full Down) حديثة، نقل السيارات العادية والرياضية والفارهة والكلاسيكية، سحب سيارات الحوادث والأعطال، إخراج السيارات العالقة في الرمال والبر، شحن وتبديل البطارية.
+- مناطق التغطية: متواجدون 24 ساعة / 7 أيام في جميع إمارات الدولة (أبوظبي، دبي، الشارقة، عجمان، العين، الفجيرة، رأس الخيمة، أم القيوين).
+- الأسعار: أسعارنا تنافسية ومناسبة وتُحدد بدقة حسب المسافة وموقع الاستلام والوجهة (لا تذكر رقماً مالياً ثابتاً من عندك، بل اطلب من العميل إرسال موقعه ووجهة النقل ليخبره السائق بالسعر الدقيق فوراً).
+- لماذا نطلب الموقع (اللوكيشن)؟: لتحديد أقرب سائق متاح إليك وحساب التكلفة بدقة والوصول إليك بأسرع وقت ممكن.
+
+التعليمات الصارمة للرد:
+1. أجب على كلام العميل وسؤاله **بنفس لغته ولهجته تماماً** (عربي، إنجليزي، هندي، أردو، إلخ).
+2. تفاعل مع كلامه بذكاء وطبيعية ولا تكرر نفس الجملة الآلية حرفياً في كل رسالة!
+3. إذا سأل سؤالاً محدداً (مثلاً: لشو اللوكيشن، بكم السعر، هل توصلون للشارقة، شو أنواع السطحات)، أجب على سؤاله أولاً بوضوح واختصار لطيف، ثم في نهاية الرد ادعه بلطف لإرسال موقعه (اللوكيشن 📍) عندما يكون جاهزاً لطلب السطحة.
+4. ممنوع ذكر وقت وصول محدد بالدقائق (لا تقل 15 دقيقة)، وممنوع وضع أرقام هواتف في الرسالة.
+5. اجعل الرد مختصراً ومرتباً ومناسباً للواتساب (2 إلى 4 أسطر كحد أقصى).`;
+
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: systemPrompt }] }],
+            generationConfig: { temperature: 0.5, maxOutputTokens: 280 },
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        console.error(`Gemini API error (${model}):`, res.status, errBody);
+        continue;
       }
-    );
 
-    if (!res.ok) {
-      return hasAlreadySentLocation
-        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن 📍) لنتحرك لك بأقرب سطحة فوراً.";
+      const data = await res.json();
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (reply) return reply;
+    } catch (e) {
+      console.error(`Gemini fetch error (${model}):`, e.message);
     }
-
-    const data = await res.json();
-    return (
-      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      (hasAlreadySentLocation
-        ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-        : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن 📍) لنتحرك لك بأقرب سطحة فوراً.")
-    );
-  } catch (e) {
-    return hasAlreadySentLocation
-      ? "يا هلا بك، موقعك مستلم بالفعل والسائق في طريقه إليك الآن."
-      : "يا هلا بك في ريكفري الإمارات.\nفضلاً أرسل موقعك المباشر (اللوكيشن 📍) لنتحرك لك بأقرب سطحة فوراً.";
   }
+
+  return fallback;
 }
 
 // Start Baileys WhatsApp Connection
@@ -286,8 +298,24 @@ async function startWhatsApp() {
           // Handle normal text message
           if (body) {
             const hasAlreadySentLocation = await redisGet(`has_location:${cleanSenderNumber}`);
-            const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation);
+            let history = [];
+            try {
+              const rawHist = await redisGet(`history:${cleanSenderNumber}`);
+              if (rawHist) history = JSON.parse(rawHist);
+            } catch (e) {}
+
+            const aiReply = await askGemini(body, senderName, !!hasAlreadySentLocation, history);
             await sendWhatsAppMessage(jid, aiReply);
+
+            // Save conversation history (last 6 messages, 1 hour TTL)
+            try {
+              const updatedHistory = [
+                ...history,
+                { role: "user", text: body },
+                { role: "bot", text: aiReply },
+              ].slice(-6);
+              await redisSet(`history:${cleanSenderNumber}`, JSON.stringify(updatedHistory), 3600);
+            } catch (e) {}
           }
         } catch (err) {
           console.error("Message processing error:", err.message);
